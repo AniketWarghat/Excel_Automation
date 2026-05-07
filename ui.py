@@ -11,6 +11,8 @@ BASE_DIR = Path(__file__).resolve().parent
 INPUT_DIR = BASE_DIR / "data" / "input"
 OUTPUT_DIR = BASE_DIR / "data" / "output"
 CLEANED_FILE = OUTPUT_DIR / "Cleaned_Data.xlsx"
+REPORT_FILE = OUTPUT_DIR / "Report.xlsx"
+REPORT_SCRIPT = BASE_DIR / "excel_sheet_create.py"
 
 INPUT_DIR.mkdir(parents=True, exist_ok=True)
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -66,6 +68,15 @@ def clear_input_folder():
 def run_data_cleaning():
     return subprocess.run(
         [sys.executable, str(BASE_DIR / "data_cleaning.py")],
+        capture_output=True,
+        text=True,
+        cwd=str(BASE_DIR)
+    )
+
+
+def run_report_generation():
+    return subprocess.run(
+        [sys.executable, str(REPORT_SCRIPT)],
         capture_output=True,
         text=True,
         cwd=str(BASE_DIR)
@@ -129,7 +140,7 @@ st.markdown("""
 # -------------------------------------------------
 st.markdown('<div class="main-title">Excel Automation Dashboard</div>', unsafe_allow_html=True)
 st.markdown(
-    '<div class="sub-title">Upload files, manage input files, run data cleaning, and review TVCs from Cleaned_Data.xlsx.</div>',
+    '<div class="sub-title">Upload files, manage input files, run data cleaning, generate report, and review TVCs from Cleaned_Data.xlsx.</div>',
     unsafe_allow_html=True
 )
 
@@ -138,11 +149,13 @@ st.markdown(
 # -------------------------------------------------
 input_files = get_existing_input_files()
 
-col1, col2 = st.columns(2)
+col1, col2, col3 = st.columns(3)
 with col1:
     st.metric("Input files available", len(input_files))
 with col2:
     st.metric("Cleaned file exists", "Yes" if CLEANED_FILE.exists() else "No")
+with col3:
+    st.metric("Report file exists", "Yes" if REPORT_FILE.exists() else "No")
 
 st.divider()
 
@@ -229,3 +242,47 @@ if st.button("Load TVCs from Cleaned_Data.xlsx", use_container_width=True):
                 st.write(f"{i}. {tvc}")
         else:
             st.info("No TVC values found in Cleaned_Data.xlsx.")
+
+st.divider()
+
+# -------------------------------------------------
+# Generate report
+# -------------------------------------------------
+st.subheader("Generate Report")
+st.write("Generate `Report.xlsx` from `data/output/Cleaned_Data.xlsx` and download it.")
+
+col1, col2 = st.columns(2)
+
+with col1:
+    if st.button("Generate report", use_container_width=True):
+        with st.spinner("Generating report..."):
+            try:
+                if not CLEANED_FILE.exists():
+                    st.error(f"{CLEANED_FILE.name} not found in data/output/. Please run data cleaning first.")
+                elif not REPORT_SCRIPT.exists():
+                    st.error(f"{REPORT_SCRIPT.name} not found in project folder.")
+                else:
+                    result = run_report_generation()
+                    if result.returncode == 0:
+                        st.success("Report generated successfully.")
+                        if result.stdout.strip():
+                            st.code(result.stdout, language="bash")
+                    else:
+                        st.error("Report generation failed.")
+                        if result.stderr.strip():
+                            st.code(result.stderr, language="bash")
+            except Exception as e:
+                st.error(f"Failed to generate report: {e}")
+
+with col2:
+    if REPORT_FILE.exists():
+        with open(REPORT_FILE, "rb") as f:
+            st.download_button(
+                label="Download Report.xlsx",
+                data=f,
+                file_name="Report.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
+    else:
+        st.info("Report.xlsx is not available yet.")
