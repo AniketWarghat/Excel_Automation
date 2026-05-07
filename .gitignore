@@ -1,0 +1,25 @@
+# Virtual environment
+.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Jupyter
+.ipynb_checkpoints/
+
+# VS Code
+.vscode/
+
+# Output files
+data/output/*.xlsx
+data/output/*.xls
+
+# Optional: ignore uploaded input files if you don't want to commit them
+# data/input/*.xlsx
+# data/input/*.xls
+
+# OS files
+.DS_Store
