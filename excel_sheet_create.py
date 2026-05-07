@@ -1,7 +1,6 @@
 from pathlib import Path
-from openpyxl import load_workbook, Workbook
-from openpyxl.chart import PieChart, Reference
-from openpyxl.chart.label import DataLabelList
+from openpyxl import load_workbook
+import xlsxwriter
 
 BASE_DIR = Path(__file__).resolve().parent
 OUTPUT_DIR = BASE_DIR / "data" / "output"
@@ -10,7 +9,6 @@ SOURCE_FILE = OUTPUT_DIR / "Cleaned_Data.xlsx"
 REPORT_FILE = OUTPUT_DIR / "Report.xlsx"
 
 SOURCE_SHEET = "Master_data"
-TARGET_SHEETS = ["Master_Data", "PCU", "Vehical_Composition"]
 
 DEFAULT_PCU_MAP = {
     "2 Wheeler": 0.2,
@@ -47,19 +45,18 @@ VEHICLE_TYPES = [
 ]
 
 
-def copy_sheet_data(source_ws, target_ws):
-    for row in source_ws.iter_rows(values_only=True):
-        target_ws.append(list(row))
+def normalize_text(value):
+    return " ".join(str(value).strip().lower().split())
 
 
-def debug_headers(ws):
-    headers = next(ws.iter_rows(min_row=1, max_row=1, values_only=True))
-    print("Master_Data headers:", list(headers))
+def get_default_pcu_value(vehicle_type):
+    vehicle_type_normalized = normalize_text(vehicle_type)
 
+    for key, value in DEFAULT_PCU_MAP.items():
+        if normalize_text(key) == vehicle_type_normalized:
+            return value
 
-def debug_sample_data(ws):
-    for row in ws.iter_rows(min_row=2, max_row=6, values_only=True):
-        print("Sample row:", row)
+    return ""
 
 
 def get_column_index_by_header(ws, expected_header):
@@ -96,6 +93,7 @@ def get_unique_tvc_names(ws):
             tvc_names.append(tvc_name)
 
     return tvc_names
+
 
 def get_tvc_wise_vehicle_totals(ws):
     tvc_col_idx = get_column_index_by_header(ws, "TVC")
@@ -138,124 +136,277 @@ def get_tvc_wise_vehicle_totals(ws):
 
     return tvc_totals
 
-def populate_vehical_composition_sheet(master_ws, vc_ws):
+
+def copy_sheet_data_to_xlsxwriter(source_ws, target_ws):
+    for r_idx, row in enumerate(source_ws.iter_rows(values_only=True)):
+        for c_idx, value in enumerate(row):
+            target_ws.write(r_idx, c_idx, value)
+
+
+def populate_pcu_sheet_xlsxwriter(pcu_ws, master_ws):
+    tvc_names = get_unique_tvc_names(master_ws)
+
+    pcu_ws.write(0, 0, "Vehicle Type")
+
+    for col_idx, tvc_name in enumerate(tvc_names, start=1):
+        pcu_ws.write(0, col_idx, tvc_name)
+
+    for row_idx, vehicle_type in enumerate(VEHICLE_TYPES, start=1):
+        pcu_ws.write(row_idx, 0, vehicle_type)
+
+        default_pcu = get_default_pcu_value(vehicle_type)
+        for col_idx in range(1, len(tvc_names) + 1):
+            pcu_ws.write(row_idx, col_idx, default_pcu)
+
+
+def get_grouped_vehicle_data(vehicle_data):
+    grouped = {
+        "2 Wheeler": vehicle_data.get("2 Wheeler", 0),
+        "Auto Rickshaw": vehicle_data.get("Auto Rickshaw", 0),
+        "Car/Jeep/ Van": vehicle_data.get("Car/Jeep/ Van", 0),
+        "Taxi/Ola/Uber": vehicle_data.get("Taxi/Ola/Uber", 0),
+        "Bus": (
+            vehicle_data.get("Mini Bus", 0)
+            + vehicle_data.get("Bus (Pvt)", 0)
+            + vehicle_data.get("Bus (Gov)", 0)
+        ),
+        "LCV(4/6-Wheels)": (
+            vehicle_data.get("LCV(4/6-Wheels)", 0)
+            + vehicle_data.get("Mini LCV/ Tata Ace", 0)
+        ),
+        "Truck": (
+            vehicle_data.get("Truck", 0)
+            + vehicle_data.get("MAV (4-6 Axle)", 0)
+            + vehicle_data.get("Garbage Vehicles", 0)
+        ),
+        "Cycle": vehicle_data.get("Cycle", 0),
+        "Others": vehicle_data.get("Others", 0),
+    }
+
+    # remove zero-value categories from chart
+    return {k: v for k, v in grouped.items() if v > 0}
+
+
+def write_grouped_chart_data(vc_ws, start_row, grouped_vehicle_data):
+    """
+    Writes grouped chart data in columns K:N
+    K = grouped vehicle class
+    L = grouped vehicle count
+    M = grouped PCU total
+    N = vehicle percentage
+    O = PCU percentage
+    """
+    vc_ws.write(start_row, 10, "Vehicles")
+    vc_ws.write(start_row, 11, "Vehicle Count")
+    vc_ws.write(start_row, 12, "PCU")
+    vc_ws.write(start_row, 13, "Vehicle %")
+    vc_ws.write(start_row, 14, "PCU %")
+
+    total_vehicle_count = sum(grouped_vehicle_data.values())
+
+    grouped_pcu_data = {}
+    for vehicle_class, count in grouped_vehicle_data.items():
+        if vehicle_class == "Bus":
+            pcu_total = (
+                grouped_vehicle_data.get("Bus", 0)  # temp placeholder, overwritten below
+            )
+        elif vehicle_class == "LCV(4/6-Wheels)":
+            pcu_total = (
+                0  # temp placeholder, overwritten below
+            )
+        elif vehicle_class == "Truck":
+            pcu_total = (
+                0  # temp placeholder, overwritten below
+            )
+        else:
+            pcu_total = count * get_default_pcu_value(vehicle_class)
+
+        grouped_pcu_data[vehicle_class] = pcu_total
+
+    # correct grouped PCUs manually
+    grouped_pcu_data["Bus"] = 0
+    grouped_pcu_data["LCV(4/6-Wheels)"] = 0
+    grouped_pcu_data["Truck"] = 0
+
+    total_pcu = sum(grouped_pcu_data.values())
+
+    row = start_row + 1
+    for vehicle_class, count in grouped_vehicle_data.items():
+        vc_ws.write(row, 10, vehicle_class)
+        vc_ws.write(row, 11, count)
+        vc_ws.write(row, 12, grouped_pcu_data.get(vehicle_class, 0))
+        vc_ws.write(row, 13, (count / total_vehicle_count) if total_vehicle_count else 0)
+        vc_ws.write(row, 14, (grouped_pcu_data.get(vehicle_class, 0) / total_pcu) if total_pcu else 0)
+        row += 1
+
+    return start_row + 1, row - 1
+
+
+def get_grouped_pcu_data_from_original(vehicle_data):
+    return {
+        "2 Wheeler": vehicle_data.get("2 Wheeler", 0) * get_default_pcu_value("2 Wheeler"),
+        "Auto Rickshaw": vehicle_data.get("Auto Rickshaw", 0) * get_default_pcu_value("Auto Rickshaw"),
+        "Car/Jeep/ Van": vehicle_data.get("Car/Jeep/ Van", 0) * get_default_pcu_value("Car/Jeep/ Van"),
+        "Taxi/Ola/Uber": vehicle_data.get("Taxi/Ola/Uber", 0) * get_default_pcu_value("Taxi/Ola/Uber"),
+        "Bus": (
+            vehicle_data.get("Mini Bus", 0) * get_default_pcu_value("Mini Bus")
+            + vehicle_data.get("Bus (Pvt)", 0) * get_default_pcu_value("Bus (Pvt)")
+            + vehicle_data.get("Bus (Gov)", 0) * get_default_pcu_value("Bus (Gov)")
+        ),
+        "LCV(4/6-Wheels)": (
+            vehicle_data.get("LCV(4/6-Wheels)", 0) * get_default_pcu_value("LCV(4/6-Wheels)")
+            + vehicle_data.get("Mini LCV/ Tata Ace", 0) * get_default_pcu_value("Mini LCV/ Tata Ace")
+        ),
+        "Truck": (
+            vehicle_data.get("Truck", 0) * get_default_pcu_value("Truck")
+            + vehicle_data.get("MAV (4-6 Axle)", 0) * get_default_pcu_value("MAV (4-6 Axle)")
+            + vehicle_data.get("Garbage Vehicles", 0) * get_default_pcu_value("Garbage Vehicles")
+        ),
+        "Cycle": vehicle_data.get("Cycle", 0) * get_default_pcu_value("Cycle"),
+        "Others": vehicle_data.get("Others", 0) * get_default_pcu_value("Others"),
+    }
+
+
+def add_pie_charts(workbook, worksheet, sheet_name, chart_data_start_row, chart_data_end_row, tvc_name):
+    vehicle_chart = workbook.add_chart({'type': 'pie'})
+
+    vehicle_chart.add_series({
+        'name': 'Vehicle Composition',
+        'categories': [sheet_name, chart_data_start_row, 10, chart_data_end_row, 10],  # K
+        'values':     [sheet_name, chart_data_start_row, 11, chart_data_end_row, 11],  # L
+        'data_labels': {
+            'percentage': True,
+            'font': {'size': 10},
+            'position': 'outside_end',
+        },
+    })
+
+    vehicle_chart.set_title({
+        'name': f'{tvc_name} Vehicle Composition',
+        'name_font': {'size': 14, 'bold': True},
+    })
+
+    vehicle_chart.set_legend({
+        'position': 'right',
+        'font': {'size': 8},
+    })
+
+    vehicle_chart.set_chartarea({'border': {'none': True}})
+    vehicle_chart.set_plotarea({'border': {'none': True}})
+
+    worksheet.insert_chart(chart_data_start_row - 1, 15, vehicle_chart, {
+        'x_scale': 1.00,
+        'y_scale': 1.00,
+    })
+
+    pcu_chart = workbook.add_chart({'type': 'pie'})
+
+    pcu_chart.add_series({
+        'name': 'PCU Composition',
+        'categories': [sheet_name, chart_data_start_row, 10, chart_data_end_row, 10],  # K
+        'values':     [sheet_name, chart_data_start_row, 12, chart_data_end_row, 12],  # M
+        'data_labels': {
+            'percentage': True,
+            'font': {'size': 10},
+            'position': 'outside_end',
+        },
+    })
+
+    pcu_chart.set_title({
+        'name': f'{tvc_name} PCU Composition',
+        'name_font': {'size': 14, 'bold': True},
+    })
+
+    pcu_chart.set_legend({
+        'position': 'right',
+        'font': {'size': 8},
+    })
+
+    pcu_chart.set_chartarea({'border': {'none': True}})
+    pcu_chart.set_plotarea({'border': {'none': True}})
+
+    worksheet.insert_chart(chart_data_start_row - 1, 24, pcu_chart, {
+        'x_scale': 1.00,
+        'y_scale': 1.00,
+    })
+
+
+def populate_vehical_composition_sheet_xlsxwriter(workbook, vc_ws, master_ws):
+    percent_format = workbook.add_format({'num_format': '0%'})
+
     tvc_totals = get_tvc_wise_vehicle_totals(master_ws)
-    current_row = 1
+    current_row = 0
 
     for tvc_name, vehicle_data in tvc_totals.items():
-        vc_ws.cell(row=current_row, column=1, value="Location")
-        vc_ws.cell(row=current_row, column=2, value=tvc_name)
+        vc_ws.write(current_row, 0, "Location")
+        vc_ws.write(current_row, 1, tvc_name)
         current_row += 2
 
-        vc_ws.cell(row=current_row, column=1, value="Values")
-        vc_ws.cell(row=current_row, column=4, value="Vehicles")
-        vc_ws.cell(row=current_row, column=5, value="Vehicle count")
-        vc_ws.cell(row=current_row, column=6, value="Vehicle Composition")
-        vc_ws.cell(row=current_row, column=7, value="PCU")
-        vc_ws.cell(row=current_row, column=8, value="PCUs")
+        vc_ws.write(current_row, 0, "Values")
+        vc_ws.write(current_row, 3, "Vehicles")
+        vc_ws.write(current_row, 4, "Vehicle count")
+        vc_ws.write(current_row, 5, "Vehicle Composition")
+        vc_ws.write(current_row, 6, "PCU")
+        vc_ws.write(current_row, 7, "PCUs")
         current_row += 1
 
-        data_start_row = current_row
         total_vehicles = sum(vehicle_data.values())
 
         for vehicle in VEHICLE_TYPES:
             vehicles_count = vehicle_data.get(vehicle, 0)
             pcu_value = get_default_pcu_value(vehicle)
 
-            if total_vehicles > 0:
-                composition = vehicles_count / total_vehicles
-            else:
-                composition = 0
-
+            composition = (vehicles_count / total_vehicles) if total_vehicles > 0 else 0
             pcu_total = vehicles_count * pcu_value if pcu_value != "" else 0
 
-            vc_ws.cell(row=current_row, column=1, value=f"Sum of {vehicle}")
-            vc_ws.cell(row=current_row, column=2, value=vehicles_count)
-            vc_ws.cell(row=current_row, column=4, value=vehicle)
-            vc_ws.cell(row=current_row, column=5, value=vehicles_count)
-
-            composition_cell = vc_ws.cell(row=current_row, column=6, value=composition)
-            composition_cell.number_format = '0%'
-
-            vc_ws.cell(row=current_row, column=7, value=pcu_value)
-            vc_ws.cell(row=current_row, column=8, value=pcu_total)
-
+            vc_ws.write(current_row, 0, f"Sum of {vehicle}")
+            vc_ws.write(current_row, 1, vehicles_count)
+            vc_ws.write(current_row, 3, vehicle)
+            vc_ws.write(current_row, 4, vehicles_count)
+            vc_ws.write(current_row, 5, composition, percent_format)
+            vc_ws.write(current_row, 6, pcu_value)
+            vc_ws.write(current_row, 7, pcu_total)
             current_row += 1
 
-        data_end_row = current_row - 1
+        vc_ws.write(current_row, 1, total_vehicles)
 
-        vc_ws.cell(row=current_row, column=2, value=total_vehicles)
+        grouped_vehicle_data = get_grouped_vehicle_data(vehicle_data)
+        grouped_pcu_data = get_grouped_pcu_data_from_original(vehicle_data)
 
-        add_pie_charts(vc_ws, data_start_row, data_end_row, tvc_name)
+        # write grouped chart data
+        chart_header_row = current_row - len(VEHICLE_TYPES) - 1
+        vc_ws.write(chart_header_row, 10, "Vehicles")
+        vc_ws.write(chart_header_row, 11, "Vehicle Count")
+        vc_ws.write(chart_header_row, 12, "PCU")
+
+        chart_data_start_row = chart_header_row + 1
+        temp_row = chart_data_start_row
+
+        for category, vehicle_count in grouped_vehicle_data.items():
+            vc_ws.write(temp_row, 10, category)
+            vc_ws.write(temp_row, 11, vehicle_count)
+            vc_ws.write(temp_row, 12, grouped_pcu_data.get(category, 0))
+            temp_row += 1
+
+        chart_data_end_row = temp_row - 1
+
+        add_pie_charts(
+            workbook=workbook,
+            worksheet=vc_ws,
+            sheet_name="Vehical_Composition",
+            chart_data_start_row=chart_data_start_row,
+            chart_data_end_row=chart_data_end_row,
+            tvc_name=tvc_name
+        )
 
         current_row += 18
-
-def add_pie_charts(ws, start_row, end_row, tvc_name):
-    # Vehicle Composition chart
-    vehicle_chart = PieChart()
-    labels = Reference(ws, min_col=4, min_row=start_row, max_row=end_row)   # Vehicles names in col D
-    data = Reference(ws, min_col=5, min_row=start_row - 1, max_row=end_row) # Vehicle counts in col E, with header
-    vehicle_chart.add_data(data, titles_from_data=True)
-    vehicle_chart.set_categories(labels)
-    vehicle_chart.title = f"{tvc_name} Vehicle Composition"
-    vehicle_chart.height = 12
-    vehicle_chart.width = 16
-    vehicle_chart.legend.position = "r"
-    vehicle_chart.dataLabels = DataLabelList()
-    vehicle_chart.dataLabels.showPercent = True
-
-    # PCU Composition chart
-    pcu_chart = PieChart()
-    pcu_labels = Reference(ws, min_col=4, min_row=start_row, max_row=end_row)   # Vehicles names in col D
-    pcu_data = Reference(ws, min_col=8, min_row=start_row - 1, max_row=end_row) # PCUs in col H, with header
-    pcu_chart.add_data(pcu_data, titles_from_data=True)
-    pcu_chart.set_categories(pcu_labels)
-    pcu_chart.title = f"{tvc_name} PCU Composition"
-    pcu_chart.height = 12
-    pcu_chart.width = 16
-    pcu_chart.legend.position = "r"
-    pcu_chart.dataLabels = DataLabelList()
-    pcu_chart.dataLabels.showPercent = True
-
-    # Place charts after column J
-    ws.add_chart(vehicle_chart, f"K{start_row - 2}")
-    ws.add_chart(pcu_chart, f"U{start_row - 2}")
-
-def normalize_text(value):
-    return " ".join(str(value).strip().lower().split())
-
-
-def get_default_pcu_value(vehicle_type):
-    vehicle_type_normalized = normalize_text(vehicle_type)
-
-    for key, value in DEFAULT_PCU_MAP.items():
-        if normalize_text(key) == vehicle_type_normalized:
-            return value
-
-    return ""
-
-
-def populate_pcu_sheet(master_ws, pcu_ws):
-    tvc_names = get_unique_tvc_names(master_ws)
-
-    pcu_ws.cell(row=1, column=1, value="Vehicle Type")
-
-    for col_idx, tvc_name in enumerate(tvc_names, start=2):
-        pcu_ws.cell(row=1, column=col_idx, value=tvc_name)
-
-    for row_idx, vehicle_type in enumerate(VEHICLE_TYPES, start=2):
-        pcu_ws.cell(row=row_idx, column=1, value=vehicle_type)
-
-        default_pcu = get_default_pcu_value(vehicle_type)
-        for col_idx in range(2, len(tvc_names) + 2):
-            pcu_ws.cell(row=row_idx, column=col_idx, value=default_pcu)
 
 
 def create_report():
     if not SOURCE_FILE.exists():
         raise FileNotFoundError(f"Source file not found: {SOURCE_FILE}")
 
-    source_wb = load_workbook(SOURCE_FILE)
+    source_wb = load_workbook(SOURCE_FILE, data_only=True)
     print("Available sheets:", source_wb.sheetnames)
 
     if SOURCE_SHEET not in source_wb.sheetnames:
@@ -266,25 +417,17 @@ def create_report():
 
     source_ws = source_wb[SOURCE_SHEET]
 
-    report_wb = Workbook()
-    report_wb.active.title = TARGET_SHEETS[0]
+    report_wb = xlsxwriter.Workbook(str(REPORT_FILE))
 
-    for sheet_name in TARGET_SHEETS[1:]:
-        report_wb.create_sheet(sheet_name)
+    master_ws = report_wb.add_worksheet("Master_Data")
+    pcu_ws = report_wb.add_worksheet("PCU")
+    vc_ws = report_wb.add_worksheet("Vehical_Composition")
 
-    target_ws = report_wb[TARGET_SHEETS[0]]
-    copy_sheet_data(source_ws, target_ws)
+    copy_sheet_data_to_xlsxwriter(source_ws, master_ws)
+    populate_pcu_sheet_xlsxwriter(pcu_ws, source_ws)
+    populate_vehical_composition_sheet_xlsxwriter(report_wb, vc_ws, source_ws)
 
-    debug_headers(target_ws)
-    debug_sample_data(target_ws)
-
-    pcu_ws = report_wb["PCU"]
-    populate_pcu_sheet(target_ws, pcu_ws)
-
-    vc_ws = report_wb["Vehical_Composition"]
-    populate_vehical_composition_sheet(target_ws, vc_ws)
-
-    report_wb.save(REPORT_FILE)
+    report_wb.close()
     print(f"Report created successfully: {REPORT_FILE}")
 
 
