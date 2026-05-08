@@ -4,6 +4,8 @@ import sys
 import pandas as pd
 import streamlit as st
 
+
+
 # -------------------------------------------------
 # Paths
 # -------------------------------------------------
@@ -13,6 +15,26 @@ OUTPUT_DIR = BASE_DIR / "data" / "output"
 CLEANED_FILE = OUTPUT_DIR / "Cleaned_Data.xlsx"
 REPORT_FILE = OUTPUT_DIR / "Report.xlsx"
 REPORT_SCRIPT = BASE_DIR / "excel_sheet_create.py"
+PCU_CONFIG_FILE = OUTPUT_DIR / "PCU_Config.xlsx"
+
+DEFAULT_PCU_MAP = {
+    "2 Wheeler": 0.2,
+    "Auto Rickshaw": 0.8,
+    "Car/Jeep/ Van": 1.0,
+    "Taxi/Ola/Uber": 1.0,
+    "Mini Bus": 2.1,
+    "Bus (Pvt)": 4.5,
+    "Bus (Gov)": 2.3,
+    "LCV(4/6-Wheels)": 3.8,
+    "Mini LCV/ Tata Ace": 2.3,
+    "Truck": 3.8,
+    "MAV (4-6 Axle)": 5.1,
+    "Garbage Vehicles": 3.8,
+    "Cycle": 0.4,
+    "Others": 2.0,
+}
+
+VEHICLE_TYPES = list(DEFAULT_PCU_MAP.keys())
 
 INPUT_DIR.mkdir(parents=True, exist_ok=True)
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -111,6 +133,62 @@ def read_tvc_list_from_cleaned_file():
 
     except Exception as e:
         return None, f"Error reading {CLEANED_FILE.name}: {e}"
+
+def load_pcu_config():
+    if PCU_CONFIG_FILE.exists():
+        try:
+            df = pd.read_excel(PCU_CONFIG_FILE)
+            if "TVC" not in df.columns:
+                return pd.DataFrame(columns=["TVC"] + VEHICLE_TYPES)
+            return df
+        except Exception:
+            return pd.DataFrame(columns=["TVC"] + VEHICLE_TYPES)
+
+    return pd.DataFrame(columns=["TVC"] + VEHICLE_TYPES)
+
+
+def get_pcu_values_for_tvc(selected_tvc):
+    df = load_pcu_config()
+
+    if not df.empty:
+        match = df[df["TVC"].astype(str).str.strip() == str(selected_tvc).strip()]
+        if not match.empty:
+            row = match.iloc[0]
+            values = {}
+            for vehicle in VEHICLE_TYPES:
+                if vehicle in row and pd.notna(row[vehicle]):
+                    values[vehicle] = float(row[vehicle])
+                else:
+                    values[vehicle] = DEFAULT_PCU_MAP[vehicle]
+            return values
+
+    return DEFAULT_PCU_MAP.copy()
+
+
+def save_pcu_values_for_tvc(selected_tvc, pcu_values):
+    df = load_pcu_config()
+
+    row_data = {"TVC": selected_tvc}
+    row_data.update(pcu_values)
+
+    if df.empty:
+        df = pd.DataFrame([row_data])
+    else:
+        mask = df["TVC"].astype(str).str.strip() == str(selected_tvc).strip()
+        if mask.any():
+            for col, val in row_data.items():
+                df.loc[mask, col] = val
+        else:
+            df = pd.concat([df, pd.DataFrame([row_data])], ignore_index=True)
+
+    for vehicle in VEHICLE_TYPES:
+        if vehicle not in df.columns:
+            df[vehicle] = None
+
+    ordered_cols = ["TVC"] + VEHICLE_TYPES
+    df = df[ordered_cols]
+
+    df.to_excel(PCU_CONFIG_FILE, index=False)
 
 
 # -------------------------------------------------
@@ -244,6 +322,45 @@ if st.button("Load TVCs from Cleaned_Data.xlsx", use_container_width=True):
             st.info("No TVC values found in Cleaned_Data.xlsx.")
 
 st.divider()
+
+# -------------------------------------------------
+# TVC-wise PCU configuration
+# -------------------------------------------------
+st.subheader("Edit PCU Values by TVC")
+st.write("Select a TVC and update PCU values. If you do not change a value, the default PCU will be used.")
+
+tvc_list, tvc_error = read_tvc_list_from_cleaned_file()
+
+if tvc_error:
+    st.info("Run data cleaning first to load available TVC values.")
+else:
+    if tvc_list:
+        selected_tvc = st.selectbox("Select TVC", tvc_list)
+
+        current_pcu_values = get_pcu_values_for_tvc(selected_tvc)
+        edited_pcu_values = {}
+
+        col1, col2 = st.columns(2)
+
+        for idx, vehicle in enumerate(VEHICLE_TYPES):
+            target_col = col1 if idx % 2 == 0 else col2
+            with target_col:
+                edited_pcu_values[vehicle] = st.number_input(
+                    label=vehicle,
+                    min_value=0.0,
+                    value=float(current_pcu_values.get(vehicle, DEFAULT_PCU_MAP[vehicle])),
+                    step=0.1,
+                    key=f"pcu_{selected_tvc}_{vehicle}"
+                )
+
+        if st.button("Save PCU values for selected TVC", use_container_width=True):
+            try:
+                save_pcu_values_for_tvc(selected_tvc, edited_pcu_values)
+                st.success(f"PCU values saved for TVC: {selected_tvc}")
+            except Exception as e:
+                st.error(f"Failed to save PCU values: {e}")
+    else:
+        st.info("No TVC values found in Cleaned_Data.xlsx.")
 
 # -------------------------------------------------
 # Generate report

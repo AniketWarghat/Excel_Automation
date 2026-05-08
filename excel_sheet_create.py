@@ -7,6 +7,7 @@ OUTPUT_DIR = BASE_DIR / "data" / "output"
 
 SOURCE_FILE = OUTPUT_DIR / "Cleaned_Data.xlsx"
 REPORT_FILE = OUTPUT_DIR / "Report.xlsx"
+PCU_CONFIG_FILE = OUTPUT_DIR / "PCU_Config.xlsx"
 
 SOURCE_SHEET = "Master_data"
 
@@ -57,6 +58,43 @@ def get_default_pcu_value(vehicle_type):
             return value
 
     return ""
+
+def load_pcu_config():
+    if PCU_CONFIG_FILE.exists():
+        try:
+            return load_workbook(PCU_CONFIG_FILE, data_only=True)
+        except Exception:
+            return None
+    return None
+
+
+def get_tvc_specific_pcu_value(tvc_name, vehicle_type):
+    if not PCU_CONFIG_FILE.exists():
+        return get_default_pcu_value(vehicle_type)
+
+    try:
+        import pandas as pd
+        df = pd.read_excel(PCU_CONFIG_FILE)
+
+        if "TVC" not in df.columns:
+            return get_default_pcu_value(vehicle_type)
+
+        match = df[df["TVC"].astype(str).str.strip() == str(tvc_name).strip()]
+        if match.empty:
+            return get_default_pcu_value(vehicle_type)
+
+        row = match.iloc[0]
+
+        if vehicle_type in row and row[vehicle_type] not in (None, ""):
+            try:
+                return float(row[vehicle_type])
+            except (TypeError, ValueError):
+                return get_default_pcu_value(vehicle_type)
+
+        return get_default_pcu_value(vehicle_type)
+
+    except Exception:
+        return get_default_pcu_value(vehicle_type)
 
 
 def get_column_index_by_header(ws, expected_header):
@@ -154,9 +192,9 @@ def populate_pcu_sheet_xlsxwriter(pcu_ws, master_ws):
     for row_idx, vehicle_type in enumerate(VEHICLE_TYPES, start=1):
         pcu_ws.write(row_idx, 0, vehicle_type)
 
-        default_pcu = get_default_pcu_value(vehicle_type)
-        for col_idx in range(1, len(tvc_names) + 1):
-            pcu_ws.write(row_idx, col_idx, default_pcu)
+        for col_idx, tvc_name in enumerate(tvc_names, start=1):
+            pcu_value = get_tvc_specific_pcu_value(tvc_name, vehicle_type)
+            pcu_ws.write(row_idx, col_idx, pcu_value)
 
 
 def get_grouped_vehicle_data(vehicle_data):
@@ -242,28 +280,28 @@ def write_grouped_chart_data(vc_ws, start_row, grouped_vehicle_data):
     return start_row + 1, row - 1
 
 
-def get_grouped_pcu_data_from_original(vehicle_data):
+def get_grouped_pcu_data_from_original(tvc_name, vehicle_data):
     return {
-        "2 Wheeler": vehicle_data.get("2 Wheeler", 0) * get_default_pcu_value("2 Wheeler"),
-        "Auto Rickshaw": vehicle_data.get("Auto Rickshaw", 0) * get_default_pcu_value("Auto Rickshaw"),
-        "Car/Jeep/ Van": vehicle_data.get("Car/Jeep/ Van", 0) * get_default_pcu_value("Car/Jeep/ Van"),
-        "Taxi/Ola/Uber": vehicle_data.get("Taxi/Ola/Uber", 0) * get_default_pcu_value("Taxi/Ola/Uber"),
+        "2 Wheeler": vehicle_data.get("2 Wheeler", 0) * get_tvc_specific_pcu_value(tvc_name, "2 Wheeler"),
+        "Auto Rickshaw": vehicle_data.get("Auto Rickshaw", 0) * get_tvc_specific_pcu_value(tvc_name, "Auto Rickshaw"),
+        "Car/Jeep/ Van": vehicle_data.get("Car/Jeep/ Van", 0) * get_tvc_specific_pcu_value(tvc_name, "Car/Jeep/ Van"),
+        "Taxi/Ola/Uber": vehicle_data.get("Taxi/Ola/Uber", 0) * get_tvc_specific_pcu_value(tvc_name, "Taxi/Ola/Uber"),
         "Bus": (
-            vehicle_data.get("Mini Bus", 0) * get_default_pcu_value("Mini Bus")
-            + vehicle_data.get("Bus (Pvt)", 0) * get_default_pcu_value("Bus (Pvt)")
-            + vehicle_data.get("Bus (Gov)", 0) * get_default_pcu_value("Bus (Gov)")
+            vehicle_data.get("Mini Bus", 0) * get_tvc_specific_pcu_value(tvc_name, "Mini Bus")
+            + vehicle_data.get("Bus (Pvt)", 0) * get_tvc_specific_pcu_value(tvc_name, "Bus (Pvt)")
+            + vehicle_data.get("Bus (Gov)", 0) * get_tvc_specific_pcu_value(tvc_name, "Bus (Gov)")
         ),
         "LCV(4/6-Wheels)": (
-            vehicle_data.get("LCV(4/6-Wheels)", 0) * get_default_pcu_value("LCV(4/6-Wheels)")
-            + vehicle_data.get("Mini LCV/ Tata Ace", 0) * get_default_pcu_value("Mini LCV/ Tata Ace")
+            vehicle_data.get("LCV(4/6-Wheels)", 0) * get_tvc_specific_pcu_value(tvc_name, "LCV(4/6-Wheels)")
+            + vehicle_data.get("Mini LCV/ Tata Ace", 0) * get_tvc_specific_pcu_value(tvc_name, "Mini LCV/ Tata Ace")
         ),
         "Truck": (
-            vehicle_data.get("Truck", 0) * get_default_pcu_value("Truck")
-            + vehicle_data.get("MAV (4-6 Axle)", 0) * get_default_pcu_value("MAV (4-6 Axle)")
-            + vehicle_data.get("Garbage Vehicles", 0) * get_default_pcu_value("Garbage Vehicles")
+            vehicle_data.get("Truck", 0) * get_tvc_specific_pcu_value(tvc_name, "Truck")
+            + vehicle_data.get("MAV (4-6 Axle)", 0) * get_tvc_specific_pcu_value(tvc_name, "MAV (4-6 Axle)")
+            + vehicle_data.get("Garbage Vehicles", 0) * get_tvc_specific_pcu_value(tvc_name, "Garbage Vehicles")
         ),
-        "Cycle": vehicle_data.get("Cycle", 0) * get_default_pcu_value("Cycle"),
-        "Others": vehicle_data.get("Others", 0) * get_default_pcu_value("Others"),
+        "Cycle": vehicle_data.get("Cycle", 0) * get_tvc_specific_pcu_value(tvc_name, "Cycle"),
+        "Others": vehicle_data.get("Others", 0) * get_tvc_specific_pcu_value(tvc_name, "Others"),
     }
 
 
@@ -354,7 +392,7 @@ def populate_vehical_composition_sheet_xlsxwriter(workbook, vc_ws, master_ws):
 
         for vehicle in VEHICLE_TYPES:
             vehicles_count = vehicle_data.get(vehicle, 0)
-            pcu_value = get_default_pcu_value(vehicle)
+            pcu_value = get_tvc_specific_pcu_value(tvc_name, vehicle)
 
             composition = (vehicles_count / total_vehicles) if total_vehicles > 0 else 0
             pcu_total = vehicles_count * pcu_value if pcu_value != "" else 0
@@ -371,7 +409,7 @@ def populate_vehical_composition_sheet_xlsxwriter(workbook, vc_ws, master_ws):
         vc_ws.write(current_row, 1, total_vehicles)
 
         grouped_vehicle_data = get_grouped_vehicle_data(vehicle_data)
-        grouped_pcu_data = get_grouped_pcu_data_from_original(vehicle_data)
+        grouped_pcu_data = get_grouped_pcu_data_from_original(tvc_name, vehicle_data)
 
         # write grouped chart data
         chart_header_row = current_row - len(VEHICLE_TYPES) - 1
