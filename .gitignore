@@ -23,3 +23,9 @@ data/output/*.xls
 
 # OS files
 .DS_Store
+
+# images
+.jpg
+.png
+.gif  
+.jpeg  
