@@ -169,8 +169,6 @@ def extract_tvc_from_sheet(df, file_name):
     return normalize_tvc(text, file_name)
 
 
-
-
 def score_header_row(row_values):
     score = 0
     texts = [norm_text(v).lower() for v in row_values]
