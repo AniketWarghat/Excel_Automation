@@ -5,17 +5,18 @@ from io import BytesIO
 from pathlib import Path
 
 # ─── CONFIG ────────────────────────────────────────────
-START_LAT = 19.293431
-START_LON = 73.017977
-END_LAT   = 18.293644
-END_LON   = 74.748198
-ZOOM      = 14
+START_LAT = 19.323922
+START_LON = 72.763488
+END_LAT   = 18.832817
+END_LON   = 72.949720
+ZOOM      = 17
 
-OUTPUT_FILE = "map_output.png"
+OUTPUT_DIR = "map_parts"
 TILE_SIZE = 256
+NUM_PARTS = 5
+
 HEADERS = {"User-Agent": "CodespaceMapStitcher/1.0 (student@example.com)"}
 
-# --- Configurable Tile Server URL ---
 TILE_SERVER_URL = "https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}&apistyle=s.e%3Al%7Cp.v%3Aoff"
 
 
@@ -70,14 +71,35 @@ def stitch_map(lat1, lon1, lat2, lon2, zoom):
     return canvas
 
 
+def generate_parts(start_lat, start_lon, end_lat, end_lon, zoom, num_parts=5):
+    output_dir = Path(OUTPUT_DIR)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    top_lat = max(start_lat, end_lat)
+    bottom_lat = min(start_lat, end_lat)
+    left_lon = min(start_lon, end_lon)
+    right_lon = max(start_lon, end_lon)
+
+    part_height = (top_lat - bottom_lat) / num_parts
+
+    for i in range(num_parts):
+        part_top = top_lat - i * part_height
+        part_bottom = top_lat - (i + 1) * part_height
+
+        print(f"\n=== Part {i+1}/{num_parts} ===")
+        print(f"Top-left:     ({part_top}, {left_lon})")
+        print(f"Bottom-right: ({part_bottom}, {right_lon})")
+
+        img = stitch_map(part_top, left_lon, part_bottom, right_lon, zoom)
+
+        output_file = output_dir / f"map_part_{i+1}.png"
+        img.save(output_file, dpi=(600, 600))
+        print(f"Saved image to: {output_file.resolve()}")
+
+
 def main():
-    img = stitch_map(START_LAT, START_LON, END_LAT, END_LON, ZOOM)
-
-    output_path = Path(OUTPUT_FILE)
-    img.save(output_path, dpi=(600, 600))
-
-    print(f"Saved image to: {output_path.resolve()}")
-    print("In GitHub Codespaces, download it from the Explorer panel or right-click the file and choose download.")
+    generate_parts(START_LAT, START_LON, END_LAT, END_LON, ZOOM, NUM_PARTS)
+    print("\nAll parts saved successfully.")
 
 
 if __name__ == "__main__":
