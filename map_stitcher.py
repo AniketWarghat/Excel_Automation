@@ -5,11 +5,11 @@ from io import BytesIO
 from pathlib import Path
 
 # ─── CONFIG ────────────────────────────────────────────
-START_LAT = 19.293431
-START_LON = 73.017977
-END_LAT   = 18.293644
-END_LON   = 74.748198
-ZOOM      = 14
+START_LAT = 19.323922
+START_LON = 72.763488
+END_LAT   = 18.832817
+END_LON   = 72.949720
+ZOOM      = 15
 
 OUTPUT_FILE = "map_output.png"
 TILE_SIZE = 256
@@ -74,7 +74,7 @@ def main():
     img = stitch_map(START_LAT, START_LON, END_LAT, END_LON, ZOOM)
 
     output_path = Path(OUTPUT_FILE)
-    img.save(output_path, dpi=(600, 600))
+    img.save(output_path, dpi=(300, 300))
 
     print(f"Saved image to: {output_path.resolve()}")
     print("In GitHub Codespaces, download it from the Explorer panel or right-click the file and choose download.")
