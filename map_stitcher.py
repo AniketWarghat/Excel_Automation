@@ -1,3 +1,7 @@
+# HEADERS = {"User-Agent": "CodespaceMapStitcher/1.0 (student@example.com)"}
+
+# TILE_SERVER_URL = "https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}&apistyle=s.e%3Al%7Cp.v%3Aoff"
+
 import math
 import requests
 from PIL import Image
@@ -5,36 +9,45 @@ from io import BytesIO
 from pathlib import Path
 
 # ─── CONFIG ────────────────────────────────────────────
-START_LAT = 19.323922
-START_LON = 72.763488
-END_LAT   = 18.832817
-END_LON   = 72.949720
-ZOOM      = 15
+START_LAT = 19.127188
+START_LON = 72.866657
+END_LAT   = 19.041070
+END_LON   = 73.015568
+ZOOM      = 17
 
-OUTPUT_FILE = "map_output.png"
+OUTPUT_DIR = "map_parts"
 TILE_SIZE = 256
-HEADERS = {"User-Agent": "CodespaceMapStitcher/1.0 (student@example.com)"}
+NUM_PARTS = 1
 
-# --- Configurable Tile Server URL ---
+HEADERS = {"User-Agent": "ColabMapStitcher/1.0 (student@gmail.com)"}
+
+# More Google-like than light_nolabels
+# TILE_SERVER_URL = "https://a.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}.png"
+#TILE_SERVER_URL = "https://a.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}.png"
 TILE_SERVER_URL = "https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}&apistyle=s.e%3Al%7Cp.v%3Aoff"
 
 
 def lat_lon_to_tile(lat, lon, zoom):
     n = 2 ** zoom
-    x = int((lon + 180) / 360 * n)
+    x = int((lon + 180.0) / 360.0 * n)
     y = int(
-        (1 - math.log(
+        (1.0 - math.log(
             math.tan(math.radians(lat)) +
-            1 / math.cos(math.radians(lat))
-        ) / math.pi) / 2 * n
+            1.0 / math.cos(math.radians(lat))
+        ) / math.pi) / 2.0 * n
     )
     return x, y
 
 
 def download_tile(z, x, y):
     url = TILE_SERVER_URL.format(z=z, x=x, y=y)
-    resp = requests.get(url, headers=HEADERS, timeout=10)
+    resp = requests.get(url, headers=HEADERS, timeout=15)
     resp.raise_for_status()
+
+    content_type = resp.headers.get("Content-Type", "")
+    if "image" not in content_type:
+        raise ValueError(f"Non-image response: {content_type}")
+
     return Image.open(BytesIO(resp.content)).convert("RGB")
 
 
@@ -51,7 +64,7 @@ def stitch_map(lat1, lon1, lat2, lon2, zoom):
     y_tiles = range(y_min_tile, y_max_tile + 1)
 
     cols, rows = len(x_tiles), len(y_tiles)
-    canvas = Image.new("RGB", (cols * TILE_SIZE, rows * TILE_SIZE))
+    canvas = Image.new("RGB", (cols * TILE_SIZE, rows * TILE_SIZE), "white")
 
     total = cols * rows
     print(f"Downloading {total} tiles ({cols}x{rows} grid) at zoom {zoom}...")
@@ -70,14 +83,35 @@ def stitch_map(lat1, lon1, lat2, lon2, zoom):
     return canvas
 
 
+def generate_parts(start_lat, start_lon, end_lat, end_lon, zoom, num_parts=5):
+    output_dir = Path(OUTPUT_DIR)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    top_lat = max(start_lat, end_lat)
+    bottom_lat = min(start_lat, end_lat)
+    left_lon = min(start_lon, end_lon)
+    right_lon = max(start_lon, end_lon)
+
+    part_height = (top_lat - bottom_lat) / num_parts
+
+    for i in range(num_parts):
+        part_top = top_lat - i * part_height
+        part_bottom = top_lat - (i + 1) * part_height
+
+        print(f"\n=== Part {i+1}/{num_parts} ===")
+        print(f"Top-left:     ({part_top}, {left_lon})")
+        print(f"Bottom-right: ({part_bottom}, {right_lon})")
+
+        img = stitch_map(part_top, left_lon, part_bottom, right_lon, zoom)
+
+        output_file = output_dir / f"map_part_{i+1}.png"
+        img.save(output_file)
+        print(f"Saved image to: {output_file.resolve()}")
+
+
 def main():
-    img = stitch_map(START_LAT, START_LON, END_LAT, END_LON, ZOOM)
-
-    output_path = Path(OUTPUT_FILE)
-    img.save(output_path, dpi=(300, 300))
-
-    print(f"Saved image to: {output_path.resolve()}")
-    print("In GitHub Codespaces, download it from the Explorer panel or right-click the file and choose download.")
+    generate_parts(START_LAT, START_LON, END_LAT, END_LON, ZOOM, NUM_PARTS)
+    print("\nAll parts saved successfully.")
 
 
 if __name__ == "__main__":
